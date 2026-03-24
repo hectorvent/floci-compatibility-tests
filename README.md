@@ -16,6 +16,7 @@ Verifies that standard AWS tooling (SDKs, CDK, OpenTofu/Terraform) works correct
 | [`sdk-test-awscli`](sdk-test-awscli/) | Bash | AWS CLI v2 | 2.22.35 |
 | [`compat-cdk`](compat-cdk/) | TypeScript | AWS CDK v2 | 2.171.1 |
 | [`compat-opentofu`](compat-opentofu/) | HCL | OpenTofu (Terraform-compatible) with AWS provider | ~5.0 |
+| [`compat-terraform`](compat-terraform/) | HCL | Terraform with AWS provider | ~6.0 |
 
 ## Prerequisites
 
@@ -34,6 +35,7 @@ Per-module requirements:
 | `sdk-test-awscli` | AWS CLI v2, bash |
 | `compat-cdk` | Node.js 18+, `aws-cdk-local` (`npm i -g aws-cdk-local`) |
 | `compat-opentofu` | OpenTofu CLI, AWS CLI |
+| `compat-terraform` | Terraform CLI, AWS CLI |
 
 ## Quick Start
 
@@ -69,6 +71,9 @@ cd sdk-test-awscli && ./test_all.sh
 
 # OpenTofu
 cd compat-opentofu && ./run.sh
+
+# Terraform
+cd compat-terraform && ./run.sh
 ```
 
 ## Configuration
@@ -234,6 +239,28 @@ FLOCI_ENDPOINT=http://my-host:4566 ./run.sh  # custom endpoint
 ```
 
 Requires `tofu` and `aws` CLIs on `PATH`.
+
+### Terraform (`compat-terraform`)
+
+Runs a full `terraform init → validate → plan → apply → spot-check → destroy` cycle using the AWS provider v6 pointed at the emulator. Provisions the same resources as the OpenTofu module:
+
+- S3 bucket with versioning
+- SQS queue + DLQ with redrive policy
+- SNS topic + SQS subscription
+- DynamoDB table with GSI and TTL
+- IAM role for Lambda
+- SSM parameters (String + SecureString)
+- Secrets Manager secret
+
+Uses S3 remote state + DynamoDB lock table (both created automatically in the emulator before the run).
+
+```bash
+cd compat-terraform
+./run.sh                                      # localhost:4566
+FLOCI_ENDPOINT=http://my-host:4566 ./run.sh  # custom endpoint
+```
+
+Requires `terraform` and `aws` CLIs on `PATH`.
 
 ## Running with Docker
 
