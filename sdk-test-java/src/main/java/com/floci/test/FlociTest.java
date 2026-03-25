@@ -50,6 +50,7 @@ import java.util.*;
  *   <li>{@code cloudwatch-logs}
  *   <li>{@code cloudwatch-metrics}
  *   <li>{@code secretsmanager}
+ *   <li>{@code ses}
  * </ul>
  */
 public class FlociTest {
@@ -94,7 +95,8 @@ public class FlociTest {
                 new SecretsManagerTests(),
                 new KmsTests(),
                 new CognitoTests(),
-                new StepFunctionsTests()
+                new StepFunctionsTests(),
+                new SesTests()
         );
 
         Set<String> enabled = resolveEnabled(args);

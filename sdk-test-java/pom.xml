@@ -132,6 +132,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>secretsmanager</artifactId>
         </dependency>
+        <!-- SES client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ses</artifactId>
+        </dependency>
         <!-- JDBC drivers for RDS data-plane tests -->
         <dependency>
             <groupId>org.postgresql</groupId>
