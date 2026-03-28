@@ -96,7 +96,8 @@ public class FlociTest {
                 new KmsTests(),
                 new CognitoTests(),
                 new StepFunctionsTests(),
-                new SesTests()
+                new SesTests(),
+                new ApiGatewayAwsIntegrationTests()
         );
 
         Set<String> enabled = resolveEnabled(args);
