@@ -51,6 +51,7 @@ import java.util.*;
  *   <li>{@code cloudwatch-metrics}
  *   <li>{@code secretsmanager}
  *   <li>{@code ses}
+ *   <li>{@code apigateway-openapi-import}
  * </ul>
  */
 public class FlociTest {
@@ -96,7 +97,8 @@ public class FlociTest {
                 new KmsTests(),
                 new CognitoTests(),
                 new StepFunctionsTests(),
-                new SesTests()
+                new SesTests(),
+                new ApiGatewayOpenApiImportTests()
         );
 
         Set<String> enabled = resolveEnabled(args);
