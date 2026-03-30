@@ -56,6 +56,7 @@ import java.util.Set;
  *   <li>{@code s3-large-object}
  *   <li>{@code s3-range}
  *   <li>{@code s3-virtual-host}
+ *   <li>{@code s3-presigned-post}
  *   <li>{@code ses}
  * </ul>
  */
@@ -75,6 +76,7 @@ public class FlociTest {
                 new S3LargeObjectTests(),
                 new S3RangeTests(),
                 new S3VirtualHostTests(),
+                new S3PresignedPostTests(),
                 new DynamoDbTests(),
                 new DynamoDbAdvancedTests(),
                 new DynamoDbLsiTests(),
