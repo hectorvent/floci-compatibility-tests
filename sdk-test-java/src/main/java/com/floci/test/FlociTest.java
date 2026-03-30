@@ -57,6 +57,7 @@ import java.util.Set;
  *   <li>{@code s3-range}
  *   <li>{@code s3-virtual-host}
  *   <li>{@code ses}
+ *   <li>{@code opensearch}
  * </ul>
  */
 public class FlociTest {
@@ -108,6 +109,7 @@ public class FlociTest {
                 new StepFunctionsJsonataTests(),
                 new StepFunctionsDynamoDbTests(),
                 new SesTests(),
+                new OpenSearchTests(),
                 new ApiGatewayAwsIntegrationTests()
         );
 
