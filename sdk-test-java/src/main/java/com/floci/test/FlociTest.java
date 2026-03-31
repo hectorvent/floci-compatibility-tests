@@ -58,6 +58,7 @@ import java.util.Set;
  *   <li>{@code s3-virtual-host}
  *   <li>{@code s3-presigned-post}
  *   <li>{@code ses}
+ *   <li>{@code apigateway-openapi-import}
  *   <li>{@code opensearch}
  * </ul>
  */
@@ -108,6 +109,7 @@ public class FlociTest {
                 new KmsTests(),
                 new CognitoTests(),
                 new StepFunctionsTests(),
+                new ApiGatewayOpenApiImportTests(),
                 new StepFunctionsJsonataTests(),
                 new StepFunctionsDynamoDbTests(),
                 new SesTests(),
