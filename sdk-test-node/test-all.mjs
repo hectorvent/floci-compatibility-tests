@@ -1233,8 +1233,8 @@ async function testCognito() {
     check("JWKS status 200", resp.ok);
     const json = await resp.json();
     check("Keys array present", Array.isArray(json.keys) && json.keys.length > 0);
-    check("Key type oct", json.keys[0].kty === "oct");
-    check("Algorithm HS256", json.keys[0].alg === "HS256");
+    check("Key type RSA", json.keys[0].kty === "RSA");
+    check("Algorithm RS256", json.keys[0].alg === "RS256");
   });
 
   await tryOk("DeleteUserPool", () =>
