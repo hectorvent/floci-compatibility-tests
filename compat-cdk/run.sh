@@ -53,6 +53,27 @@ QUEUES=$(aws --endpoint-url "$ENDPOINT" sqs list-queues 2>/dev/null | python3 -c
 TABLES=$(aws --endpoint-url "$ENDPOINT" dynamodb list-tables 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('TableNames', [])))" 2>/dev/null || echo "0")
 [ "$TABLES" -gt 0 ] && check "DynamoDB table exists" 0 || check "DynamoDB table exists" 1
 
+# DynamoDB GSI/LSI index table — validates CloudFormation index provisioning (PR #125)
+IDX_DESC=$(aws --endpoint-url "$ENDPOINT" dynamodb describe-table --table-name floci-cdk-index-table 2>/dev/null || echo '{}')
+
+GSI_COUNT=$(echo "$IDX_DESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Table',{}).get('GlobalSecondaryIndexes',[])))" 2>/dev/null || echo "0")
+[ "$GSI_COUNT" -eq 1 ] && check "DynamoDB GSI exists on index table" 0 || check "DynamoDB GSI exists on index table" 1
+
+GSI_NAME=$(echo "$IDX_DESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['GlobalSecondaryIndexes'][0]['IndexName'])" 2>/dev/null || echo "")
+[ "$GSI_NAME" = "gsi-1" ] && check "DynamoDB GSI name is gsi-1" 0 || check "DynamoDB GSI name is gsi-1" 1
+
+GSI_PROJ=$(echo "$IDX_DESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['GlobalSecondaryIndexes'][0]['Projection']['ProjectionType'])" 2>/dev/null || echo "")
+[ "$GSI_PROJ" = "ALL" ] && check "DynamoDB GSI projection ALL" 0 || check "DynamoDB GSI projection ALL" 1
+
+LSI_COUNT=$(echo "$IDX_DESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Table',{}).get('LocalSecondaryIndexes',[])))" 2>/dev/null || echo "0")
+[ "$LSI_COUNT" -eq 1 ] && check "DynamoDB LSI exists on index table" 0 || check "DynamoDB LSI exists on index table" 1
+
+LSI_NAME=$(echo "$IDX_DESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['LocalSecondaryIndexes'][0]['IndexName'])" 2>/dev/null || echo "")
+[ "$LSI_NAME" = "lsi-1" ] && check "DynamoDB LSI name is lsi-1" 0 || check "DynamoDB LSI name is lsi-1" 1
+
+LSI_PROJ=$(echo "$IDX_DESC" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['LocalSecondaryIndexes'][0]['Projection']['ProjectionType'])" 2>/dev/null || echo "")
+[ "$LSI_PROJ" = "KEYS_ONLY" ] && check "DynamoDB LSI projection KEYS_ONLY" 0 || check "DynamoDB LSI projection KEYS_ONLY" 1
+
 # CloudFormation stack exists
 CF_STATUS=$(aws --endpoint-url "$ENDPOINT" cloudformation describe-stacks \
     --stack-name FlociTestStack 2>/dev/null | \

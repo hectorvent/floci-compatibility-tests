@@ -156,7 +156,7 @@ cargo run -- ssm sqs s3  # specific groups
 
 ### AWS CLI (`sdk-test-awscli`)
 
-Covers: SSM, SQS, SNS, S3, DynamoDB, IAM, STS, Secrets Manager, KMS.
+Covers: SSM, SQS, SNS, S3, DynamoDB, DynamoDB GSI/LSI, IAM, STS, Secrets Manager, KMS.
 
 ```bash
 cd sdk-test-awscli
@@ -177,7 +177,7 @@ go run main.go ssm sqs s3  # specific groups
 
 ### Node.js SDK (`sdk-test-node`)
 
-Covers: SSM, SQS, SNS, S3, DynamoDB, Lambda, IAM, STS, Secrets Manager, KMS, Kinesis, CloudWatch Metrics, Cognito.
+Covers: SSM, SQS, SNS, S3, DynamoDB, DynamoDB GSI/LSI, Lambda, IAM, STS, Secrets Manager, KMS, Kinesis, CloudWatch Metrics, Cognito.
 
 ```bash
 cd sdk-test-node
@@ -189,7 +189,7 @@ FLOCI_TESTS=kms node test-all.mjs
 
 ### Python SDK (`sdk-test-python`)
 
-Covers: SSM, SQS, SNS, S3, DynamoDB, Lambda, IAM, STS, Secrets Manager, KMS, Kinesis, CloudWatch Metrics, Cognito.
+Covers: SSM, SQS, SNS, S3, DynamoDB, DynamoDB GSI/LSI, Lambda, IAM, STS, Secrets Manager, KMS, Kinesis, CloudWatch Metrics, Cognito.
 
 ```bash
 cd sdk-test-python

@@ -23,8 +23,32 @@ export class FlociTestStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
+    // DynamoDB table with GSI and LSI — validates CloudFormation index provisioning (PR #125)
+    const indexTable = new dynamodb.TableV2(this, 'IndexTestTable', {
+      tableName: 'floci-cdk-index-table',
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'gsi-1',
+          partitionKey: { name: 'gsiPk', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.ALL,
+        },
+      ],
+      localSecondaryIndexes: [
+        {
+          indexName: 'lsi-1',
+          sortKey: { name: 'lsiSk', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.KEYS_ONLY,
+        },
+      ],
+    });
+
     new cdk.CfnOutput(this, 'BucketName', { value: bucket.bucketName });
     new cdk.CfnOutput(this, 'QueueUrl', { value: queue.queueUrl });
     new cdk.CfnOutput(this, 'TableName', { value: table.tableName });
+    new cdk.CfnOutput(this, 'IndexTableName', { value: indexTable.tableName });
   }
 }

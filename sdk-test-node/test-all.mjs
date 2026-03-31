@@ -486,6 +486,112 @@ async function testDynamoDb() {
     dynamo.send(new DeleteTableCommand({ TableName: table })));
 }
 
+// ───────────────────── DynamoDB GSI/LSI ─────────────────────
+// Validates CloudFormation index provisioning (PR #125)
+async function testDynamoDbGsi() {
+  console.log("\n=== DynamoDB GSI/LSI ===");
+  const dynamo = makeClient(DynamoDBClient);
+  const table = "floci-node-gsi-table";
+
+  // CreateTable with GSI and LSI
+  await tryOk("CreateTable with GSI+LSI", () =>
+    dynamo.send(new CreateTableCommand({
+      TableName: table,
+      KeySchema: [
+        { AttributeName: "pk", KeyType: "HASH" },
+        { AttributeName: "sk", KeyType: "RANGE" },
+      ],
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "sk", AttributeType: "S" },
+        { AttributeName: "gsiPk", AttributeType: "S" },
+        { AttributeName: "lsiSk", AttributeType: "S" },
+      ],
+      GlobalSecondaryIndexes: [{
+        IndexName: "gsi-1",
+        KeySchema: [
+          { AttributeName: "gsiPk", KeyType: "HASH" },
+          { AttributeName: "sk", KeyType: "RANGE" },
+        ],
+        Projection: { ProjectionType: "ALL" },
+        ProvisionedThroughput: { ReadCapacityUnits: 5, WriteCapacityUnits: 5 },
+      }],
+      LocalSecondaryIndexes: [{
+        IndexName: "lsi-1",
+        KeySchema: [
+          { AttributeName: "pk", KeyType: "HASH" },
+          { AttributeName: "lsiSk", KeyType: "RANGE" },
+        ],
+        Projection: { ProjectionType: "KEYS_ONLY" },
+      }],
+      ProvisionedThroughput: { ReadCapacityUnits: 5, WriteCapacityUnits: 5 },
+    })));
+
+  // DescribeTable — verify indexes
+  try {
+    const desc = await dynamo.send(new DescribeTableCommand({ TableName: table }));
+    const gsis = desc.Table.GlobalSecondaryIndexes || [];
+    const lsis = desc.Table.LocalSecondaryIndexes || [];
+    check("GSI count", gsis.length === 1);
+    check("GSI name", gsis[0]?.IndexName === "gsi-1");
+    check("GSI projection", gsis[0]?.Projection?.ProjectionType === "ALL");
+    check("LSI count", lsis.length === 1);
+    check("LSI name", lsis[0]?.IndexName === "lsi-1");
+    check("LSI projection", lsis[0]?.Projection?.ProjectionType === "KEYS_ONLY");
+  } catch (e) {
+    check("DescribeTable GSI/LSI", false, e.message);
+  }
+
+  // PutItem — 2 with gsiPk, 1 sparse
+  await tryOk("PutItem gsi-1", () =>
+    dynamo.send(new PutItemCommand({
+      TableName: table,
+      Item: { pk: { S: "item-1" }, sk: { S: "rev-1" }, gsiPk: { S: "group-A" }, lsiSk: { S: "2024-01-01" } },
+    })));
+  await tryOk("PutItem gsi-2", () =>
+    dynamo.send(new PutItemCommand({
+      TableName: table,
+      Item: { pk: { S: "item-2" }, sk: { S: "rev-1" }, gsiPk: { S: "group-A" }, lsiSk: { S: "2024-01-02" } },
+    })));
+  await tryOk("PutItem sparse", () =>
+    dynamo.send(new PutItemCommand({
+      TableName: table,
+      Item: { pk: { S: "item-3" }, sk: { S: "rev-1" }, data: { S: "no-gsi-attrs" } },
+    })));
+
+  // Query GSI — should return 2 items with gsiPk="group-A"
+  try {
+    const resp = await dynamo.send(new QueryCommand({
+      TableName: table,
+      IndexName: "gsi-1",
+      KeyConditionExpression: "gsiPk = :gpk",
+      ExpressionAttributeValues: { ":gpk": { S: "group-A" } },
+    }));
+    check("GSI Query returns 2 items", resp.Count === 2);
+    const pks = new Set(resp.Items.map(i => i.pk.S));
+    check("GSI sparse excludes item-3", !pks.has("item-3"));
+  } catch (e) {
+    check("GSI Query", false, e.message);
+  }
+
+  // Query LSI — pk="item-1", lsiSk > "2024-01-00"
+  try {
+    const resp = await dynamo.send(new QueryCommand({
+      TableName: table,
+      IndexName: "lsi-1",
+      KeyConditionExpression: "pk = :pk AND lsiSk > :d",
+      ExpressionAttributeValues: { ":pk": { S: "item-1" }, ":d": { S: "2024-01-00" } },
+    }));
+    check("LSI Query returns 1 item", resp.Count === 1);
+  } catch (e) {
+    check("LSI Query", false, e.message);
+  }
+
+  // Cleanup
+  await tryOk("DeleteTable", () =>
+    dynamo.send(new DeleteTableCommand({ TableName: table })));
+}
+
 // ─────────────────────────── Lambda ───────────────────────────
 async function testLambda() {
   console.log("\n=== Lambda ===");
@@ -1007,6 +1113,7 @@ const ALL_SUITES = {
   sns: testSns,
   s3: testS3,
   dynamodb: testDynamoDb,
+  "dynamodb-gsi": testDynamoDbGsi,
   lambda: testLambda,
   iam: testIam,
   sts: testSts,

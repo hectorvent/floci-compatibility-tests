@@ -433,6 +433,61 @@ run_dynamodb() {
 }
 
 # ---------------------------------------------------------------------------
+# DynamoDB GSI/LSI (validates CloudFormation index provisioning — PR #125)
+# ---------------------------------------------------------------------------
+
+run_dynamodb_gsi() {
+    echo "--- DynamoDB GSI/LSI Tests ---"
+    local table="cli-sdk-gsi-table"
+
+    local out rc
+
+    # CreateTable with GSI and LSI
+    out=$(aws_cmd dynamodb create-table \
+        --table-name "$table" \
+        --attribute-definitions \
+            AttributeName=pk,AttributeType=S \
+            AttributeName=sk,AttributeType=S \
+            AttributeName=gsiPk,AttributeType=S \
+            AttributeName=lsiSk,AttributeType=S \
+        --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE \
+        --global-secondary-indexes \
+            'IndexName=gsi-1,KeySchema=[{AttributeName=gsiPk,KeyType=HASH},{AttributeName=sk,KeyType=RANGE}],Projection={ProjectionType=ALL},ProvisionedThroughput={ReadCapacityUnits=5,WriteCapacityUnits=5}' \
+        --local-secondary-indexes \
+            'IndexName=lsi-1,KeySchema=[{AttributeName=pk,KeyType=HASH},{AttributeName=lsiSk,KeyType=RANGE}],Projection={ProjectionType=KEYS_ONLY}' \
+        --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 2>&1) && rc=0 || rc=1
+    check "DynamoDB GSI/LSI CreateTable" "$( [ $rc -eq 0 ] && echo true || echo false )" "$out"
+
+    # DescribeTable — verify GSI and LSI
+    out=$(aws_cmd dynamodb describe-table --table-name "$table" 2>&1) && rc=0 || rc=1
+    if [ $rc -eq 0 ]; then
+        local gsi_count lsi_count gsi_name lsi_name gsi_proj lsi_proj
+        gsi_count=$(echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Table',{}).get('GlobalSecondaryIndexes',[])))" 2>/dev/null || echo "0")
+        check "DynamoDB GSI count" "$( [ "$gsi_count" = "1" ] && echo true || echo false )" "got $gsi_count"
+
+        gsi_name=$(echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['GlobalSecondaryIndexes'][0]['IndexName'])" 2>/dev/null || echo "")
+        check "DynamoDB GSI name" "$( [ "$gsi_name" = "gsi-1" ] && echo true || echo false )" "got $gsi_name"
+
+        gsi_proj=$(echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['GlobalSecondaryIndexes'][0]['Projection']['ProjectionType'])" 2>/dev/null || echo "")
+        check "DynamoDB GSI projection" "$( [ "$gsi_proj" = "ALL" ] && echo true || echo false )" "got $gsi_proj"
+
+        lsi_count=$(echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('Table',{}).get('LocalSecondaryIndexes',[])))" 2>/dev/null || echo "0")
+        check "DynamoDB LSI count" "$( [ "$lsi_count" = "1" ] && echo true || echo false )" "got $lsi_count"
+
+        lsi_name=$(echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['LocalSecondaryIndexes'][0]['IndexName'])" 2>/dev/null || echo "")
+        check "DynamoDB LSI name" "$( [ "$lsi_name" = "lsi-1" ] && echo true || echo false )" "got $lsi_name"
+
+        lsi_proj=$(echo "$out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['Table']['LocalSecondaryIndexes'][0]['Projection']['ProjectionType'])" 2>/dev/null || echo "")
+        check "DynamoDB LSI projection" "$( [ "$lsi_proj" = "KEYS_ONLY" ] && echo true || echo false )" "got $lsi_proj"
+    else
+        check "DynamoDB GSI/LSI DescribeTable" false "$out"
+    fi
+
+    # Cleanup
+    aws_cmd dynamodb delete-table --table-name "$table" >/dev/null 2>&1 || true
+}
+
+# ---------------------------------------------------------------------------
 # IAM
 # ---------------------------------------------------------------------------
 
@@ -547,7 +602,7 @@ run_kms() {
 # Group registry and entry point
 # ---------------------------------------------------------------------------
 
-ALL_GROUPS=(ssm sqs sns s3 dynamodb iam sts secretsmanager kms)
+ALL_GROUPS=(ssm sqs sns s3 dynamodb dynamodb-gsi iam sts secretsmanager kms)
 
 resolve_enabled() {
     local names=()

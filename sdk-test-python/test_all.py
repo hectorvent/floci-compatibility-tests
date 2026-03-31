@@ -901,6 +901,125 @@ def run_dynamodb():
 
 
 # ---------------------------------------------------------------------------
+# DynamoDB GSI/LSI (validates CloudFormation index provisioning — PR #125)
+# ---------------------------------------------------------------------------
+
+def run_dynamodb_gsi():
+    print("--- DynamoDB GSI/LSI Tests ---")
+    ddb = client("dynamodb")
+    table = "py-sdk-gsi-table"
+
+    # CreateTable with GSI and LSI
+    try:
+        ddb.create_table(
+            TableName=table,
+            KeySchema=[
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "gsiPk", "AttributeType": "S"},
+                {"AttributeName": "lsiSk", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "gsi-1",
+                    "KeySchema": [
+                        {"AttributeName": "gsiPk", "KeyType": "HASH"},
+                        {"AttributeName": "sk", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                    "ProvisionedThroughput": {"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+                }
+            ],
+            LocalSecondaryIndexes=[
+                {
+                    "IndexName": "lsi-1",
+                    "KeySchema": [
+                        {"AttributeName": "pk", "KeyType": "HASH"},
+                        {"AttributeName": "lsiSk", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "KEYS_ONLY"},
+                }
+            ],
+            ProvisionedThroughput={"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
+        )
+        check("DDB GSI/LSI CreateTable", True)
+    except Exception as e:
+        check("DDB GSI/LSI CreateTable", False, e)
+        return
+
+    # DescribeTable — verify indexes exist
+    try:
+        desc = ddb.describe_table(TableName=table)["Table"]
+        gsis = desc.get("GlobalSecondaryIndexes", [])
+        lsis = desc.get("LocalSecondaryIndexes", [])
+        check("DDB GSI count", len(gsis) == 1)
+        check("DDB GSI name", gsis[0]["IndexName"] == "gsi-1" if gsis else False)
+        check("DDB GSI projection", gsis[0]["Projection"]["ProjectionType"] == "ALL" if gsis else False)
+        check("DDB LSI count", len(lsis) == 1)
+        check("DDB LSI name", lsis[0]["IndexName"] == "lsi-1" if lsis else False)
+        check("DDB LSI projection", lsis[0]["Projection"]["ProjectionType"] == "KEYS_ONLY" if lsis else False)
+    except Exception as e:
+        check("DDB GSI/LSI DescribeTable", False, e)
+
+    # PutItem — 2 items with gsiPk, 1 sparse (no gsiPk)
+    try:
+        ddb.put_item(TableName=table, Item={
+            "pk": {"S": "item-1"}, "sk": {"S": "rev-1"},
+            "gsiPk": {"S": "group-A"}, "lsiSk": {"S": "2024-01-01"},
+        })
+        ddb.put_item(TableName=table, Item={
+            "pk": {"S": "item-2"}, "sk": {"S": "rev-1"},
+            "gsiPk": {"S": "group-A"}, "lsiSk": {"S": "2024-01-02"},
+        })
+        ddb.put_item(TableName=table, Item={
+            "pk": {"S": "item-3"}, "sk": {"S": "rev-1"},
+            "data": {"S": "no-gsi-attrs"},
+        })
+        check("DDB GSI PutItem", True)
+    except Exception as e:
+        check("DDB GSI PutItem", False, e)
+
+    # Query GSI — should return only the 2 items with gsiPk="group-A"
+    try:
+        resp = ddb.query(
+            TableName=table,
+            IndexName="gsi-1",
+            KeyConditionExpression="gsiPk = :gpk",
+            ExpressionAttributeValues={":gpk": {"S": "group-A"}},
+        )
+        check("DDB GSI Query returns 2 items", resp["Count"] == 2)
+        pks = {item["pk"]["S"] for item in resp["Items"]}
+        check("DDB GSI sparse excludes item-3", "item-3" not in pks)
+    except Exception as e:
+        check("DDB GSI Query", False, e)
+
+    # Query LSI — pk="item-1", lsiSk > "2024-01-00"
+    try:
+        resp = ddb.query(
+            TableName=table,
+            IndexName="lsi-1",
+            KeyConditionExpression="pk = :pk AND lsiSk > :d",
+            ExpressionAttributeValues={
+                ":pk": {"S": "item-1"},
+                ":d": {"S": "2024-01-00"},
+            },
+        )
+        check("DDB LSI Query returns 1 item", resp["Count"] == 1)
+    except Exception as e:
+        check("DDB LSI Query", False, e)
+
+    # Cleanup
+    try:
+        ddb.delete_table(TableName=table)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Lambda (management plane)
 # ---------------------------------------------------------------------------
 
@@ -1820,6 +1939,7 @@ ALL_GROUPS = [
     ("sns", run_sns),
     ("s3", run_s3),
     ("dynamodb", run_dynamodb),
+    ("dynamodb-gsi", run_dynamodb_gsi),
     ("lambda", run_lambda),
     ("iam", run_iam),
     ("sts", run_sts),
