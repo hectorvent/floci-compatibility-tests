@@ -160,7 +160,71 @@ public class EventBridgeTests implements TestGroup {
                 ctx.check("EB SQS received event", false, e);
             }
 
-            // 10. DisableRule — PutEvents should NOT deliver
+            // 10. InputTransformer — target receives projected payload
+            String transformerQueueUrl = null;
+            try {
+                transformerQueueUrl = sqs.createQueue(CreateQueueRequest.builder()
+                        .queueName("eb-transformer-queue")
+                        .build()).queueUrl();
+                String transformerQueueArn = sqs.getQueueAttributes(GetQueueAttributesRequest.builder()
+                        .queueUrl(transformerQueueUrl)
+                        .attributeNamesWithStrings("QueueArn")
+                        .build()).attributesAsStrings().get("QueueArn");
+
+                // Put a second rule on the default bus with an InputTransformer target
+                eb.putRule(PutRuleRequest.builder()
+                        .name("transformer-rule")
+                        .eventPattern("{\"source\":[\"com.transformer\"]}")
+                        .state(RuleState.ENABLED)
+                        .build());
+                eb.putTargets(PutTargetsRequest.builder()
+                        .rule("transformer-rule")
+                        .targets(software.amazon.awssdk.services.eventbridge.model.Target.builder()
+                                .id("t1")
+                                .arn(transformerQueueArn)
+                                .inputTransformer(InputTransformer.builder()
+                                        .inputPathsMap(java.util.Map.of(
+                                                "src", "$.source",
+                                                "type", "$.detail-type"))
+                                        .inputTemplate("{\"origin\":\"<src>\",\"eventType\":\"<type>\"}")
+                                        .build())
+                                .build())
+                        .build());
+
+                eb.putEvents(PutEventsRequest.builder()
+                        .entries(PutEventsRequestEntry.builder()
+                                .source("com.transformer")
+                                .detailType("UserSignedUp")
+                                .detail("{\"userId\":\"abc\"}")
+                                .build())
+                        .build());
+
+                Thread.sleep(500);
+                ReceiveMessageResponse recv = sqs.receiveMessage(ReceiveMessageRequest.builder()
+                        .queueUrl(transformerQueueUrl)
+                        .maxNumberOfMessages(1)
+                        .waitTimeSeconds(2)
+                        .build());
+                boolean received = !recv.messages().isEmpty();
+                String body = received ? recv.messages().get(0).body() : "";
+                ctx.check("EB InputTransformer received", received);
+                ctx.check("EB InputTransformer has origin", body.contains("com.transformer"));
+                ctx.check("EB InputTransformer has eventType", body.contains("UserSignedUp"));
+                ctx.check("EB InputTransformer no userId", !body.contains("userId"));
+
+                // Cleanup transformer rule
+                eb.removeTargets(RemoveTargetsRequest.builder().rule("transformer-rule").ids("t1").build());
+                eb.deleteRule(DeleteRuleRequest.builder().name("transformer-rule").build());
+                final String fTransformerQueueUrl = transformerQueueUrl;
+                sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(fTransformerQueueUrl).build());
+            } catch (Exception e) {
+                ctx.check("EB InputTransformer", false, e);
+                if (transformerQueueUrl != null) {
+                    try { sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(transformerQueueUrl).build()); } catch (Exception ignored) {}
+                }
+            }
+
+            // 11. DisableRule — PutEvents should NOT deliver
             try {
                 eb.disableRule(DisableRuleRequest.builder()
                         .name("test-rule")
