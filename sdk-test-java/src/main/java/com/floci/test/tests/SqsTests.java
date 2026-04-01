@@ -237,19 +237,42 @@ public class SqsTests implements TestGroup {
                 ctx.check("SQS ChangeMessageVisibilityBatch", false, e);
             }
 
-            // 15. Message Attributes
+            // 15. String Message Attribute (SDK validates MD5OfMessageAttributes client-side)
             final String qUrl = queueUrl;
             try {
                 sqs.sendMessage(b -> b.queueUrl(qUrl).messageBody("msg-attrs")
-                        .messageAttributes(java.util.Map.of("myattr", MessageAttributeValue.builder().dataType("String").stringValue("myval").build())));
+                        .messageAttributes(java.util.Map.of("myattr",
+                                MessageAttributeValue.builder().dataType("String").stringValue("myval").build())));
                 ReceiveMessageResponse rcv = sqs.receiveMessage(b -> b.queueUrl(qUrl).maxNumberOfMessages(1).messageAttributeNames("All"));
-                ctx.check("SQS MessageAttributes", !rcv.messages().isEmpty() && "myval".equals(rcv.messages().get(0).messageAttributes().get("myattr").stringValue()));
+                ctx.check("SQS MessageAttributes string", !rcv.messages().isEmpty()
+                        && "myval".equals(rcv.messages().get(0).messageAttributes().get("myattr").stringValue()));
                 sqs.deleteMessage(b -> b.queueUrl(qUrl).receiptHandle(rcv.messages().get(0).receiptHandle()));
             } catch (Exception e) {
-                ctx.check("SQS MessageAttributes", false, e);
+                ctx.check("SQS MessageAttributes string", false, e);
             }
 
-            // 16. Long Polling
+            // 16. Binary Message Attribute (SDK validates MD5OfMessageAttributes client-side)
+            try {
+                byte[] binaryPayload = new byte[]{1, 2, 3, 4, 5};
+                sqs.sendMessage(b -> b.queueUrl(qUrl).messageBody("binary-msg")
+                        .messageAttributes(java.util.Map.of("payload",
+                                MessageAttributeValue.builder()
+                                        .dataType("Binary")
+                                        .binaryValue(software.amazon.awssdk.core.SdkBytes.fromByteArray(binaryPayload))
+                                        .build())));
+                ReceiveMessageResponse rcv = sqs.receiveMessage(b -> b.queueUrl(qUrl).maxNumberOfMessages(1).messageAttributeNames("All"));
+                boolean hasBinaryAttr = !rcv.messages().isEmpty()
+                        && rcv.messages().get(0).messageAttributes().containsKey("payload")
+                        && rcv.messages().get(0).messageAttributes().get("payload").binaryValue() != null;
+                ctx.check("SQS MessageAttributes binary", hasBinaryAttr);
+                if (!rcv.messages().isEmpty()) {
+                    sqs.deleteMessage(b -> b.queueUrl(qUrl).receiptHandle(rcv.messages().get(0).receiptHandle()));
+                }
+            } catch (Exception e) {
+                ctx.check("SQS MessageAttributes binary", false, e);
+            }
+
+            // 17. Long Polling
             try {
                 long start = System.currentTimeMillis();
                 sqs.receiveMessage(b -> b.queueUrl(qUrl).maxNumberOfMessages(1).waitTimeSeconds(2));
@@ -259,7 +282,7 @@ public class SqsTests implements TestGroup {
                 ctx.check("SQS Long Polling", false, e);
             }
 
-            // 17. DLQ Routing
+            // 18. DLQ Routing
             String dlqUrl = null;
             try {
                 dlqUrl = sqs.createQueue(b -> b.queueName("sdk-test-dlq")).queueUrl();
@@ -294,7 +317,7 @@ public class SqsTests implements TestGroup {
                 ctx.check("SQS DLQ Routing", false, e);
             }
 
-            // 18. ListDeadLetterSourceQueues
+            // 19. ListDeadLetterSourceQueues
             final String finalDlqUrl = dlqUrl;
             try {
                 ListDeadLetterSourceQueuesResponse resp = sqs.listDeadLetterSourceQueues(b -> b.queueUrl(finalDlqUrl));
@@ -304,7 +327,7 @@ public class SqsTests implements TestGroup {
                 ctx.check("SQS ListDeadLetterSourceQueues", false, e);
             }
 
-            // 19. StartMessageMoveTask
+            // 20. StartMessageMoveTask
             try {
                 // DLQ to Source
                 StartMessageMoveTaskResponse moveResp = sqs.startMessageMoveTask(b -> b.sourceArn(sqs.getQueueAttributes(a -> a.queueUrl(finalDlqUrl).attributeNames(QueueAttributeName.QUEUE_ARN)).attributes().get(QueueAttributeName.QUEUE_ARN)));
