@@ -150,7 +150,67 @@ public class SnsTests implements TestGroup {
                 ctx.check("SNS Delivery with Attrs", false, e);
             }
 
-            // 9. Unsubscribe
+            // 9. RawMessageDelivery - raw body without SNS envelope
+            try {
+                String rawQueueName = "sns-raw-delivery-" + System.currentTimeMillis();
+                String rawQueueUrl = sqs.createQueue(CreateQueueRequest.builder().queueName(rawQueueName).build()).queueUrl();
+                String rawQueueArn = sqs.getQueueAttributes(GetQueueAttributesRequest.builder()
+                        .queueUrl(rawQueueUrl)
+                        .attributeNames(QueueAttributeName.QUEUE_ARN)
+                        .build())
+                        .attributes().get(QueueAttributeName.QUEUE_ARN);
+
+                String rawSubArn = sns.subscribe(SubscribeRequest.builder()
+                        .topicArn(topicArn)
+                        .protocol("sqs")
+                        .endpoint(rawQueueArn)
+                        .build()).subscriptionArn();
+
+                sns.setSubscriptionAttributes(SetSubscriptionAttributesRequest.builder()
+                        .subscriptionArn(rawSubArn)
+                        .attributeName("RawMessageDelivery")
+                        .attributeValue("true")
+                        .build());
+
+                sns.publish(PublishRequest.builder()
+                        .topicArn(topicArn)
+                        .message("raw-delivery-content")
+                        .messageAttributes(Map.of(
+                                "color", software.amazon.awssdk.services.sns.model.MessageAttributeValue.builder()
+                                        .dataType("String").stringValue("blue").build(),
+                                "count", software.amazon.awssdk.services.sns.model.MessageAttributeValue.builder()
+                                        .dataType("Number").stringValue("42").build()
+                        ))
+                        .build());
+
+                Thread.sleep(500);
+                ReceiveMessageResponse rawRecv = sqs.receiveMessage(ReceiveMessageRequest.builder()
+                        .queueUrl(rawQueueUrl)
+                        .maxNumberOfMessages(1)
+                        .waitTimeSeconds(2)
+                        .messageAttributeNames("All")
+                        .build());
+
+                ctx.check("SNS RawMessageDelivery received", !rawRecv.messages().isEmpty());
+                if (!rawRecv.messages().isEmpty()) {
+                    String body = rawRecv.messages().get(0).body();
+                    ctx.check("SNS RawMessageDelivery no envelope", !body.contains("\"Type\":\"Notification\""));
+                    ctx.check("SNS RawMessageDelivery raw content", body.equals("raw-delivery-content"));
+                    Map<String, software.amazon.awssdk.services.sqs.model.MessageAttributeValue> msgAttrs =
+                            rawRecv.messages().get(0).messageAttributes();
+                    ctx.check("SNS RawMessageDelivery String attr forwarded",
+                            msgAttrs.containsKey("color") && "blue".equals(msgAttrs.get("color").stringValue()));
+                    ctx.check("SNS RawMessageDelivery Number attr forwarded",
+                            msgAttrs.containsKey("count") && "Number".equals(msgAttrs.get("count").dataType()));
+                }
+
+                sns.unsubscribe(UnsubscribeRequest.builder().subscriptionArn(rawSubArn).build());
+                sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(rawQueueUrl).build());
+            } catch (Exception e) {
+                ctx.check("SNS RawMessageDelivery", false, e);
+            }
+
+            // 10. Unsubscribe
             try {
                 sns.unsubscribe(UnsubscribeRequest.builder().subscriptionArn(subscriptionArn).build());
                 ctx.check("SNS Unsubscribe", true);
@@ -158,7 +218,7 @@ public class SnsTests implements TestGroup {
                 ctx.check("SNS Unsubscribe", false, e);
             }
 
-            // 10. DeleteTopic
+            // 11. DeleteTopic
             try {
                 sns.deleteTopic(DeleteTopicRequest.builder().topicArn(topicArn).build());
                 ctx.check("SNS DeleteTopic", true);
