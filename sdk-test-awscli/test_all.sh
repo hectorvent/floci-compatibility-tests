@@ -27,6 +27,10 @@ aws_cmd() {
     aws --endpoint-url "$ENDPOINT" --region "$REGION" --output json "$@" 2>&1
 }
 
+python() {
+    command "python3" "$@"
+}
+
 check() {
     local name="$1"
     local ok="$2"
@@ -39,6 +43,8 @@ check() {
         printf "  FAIL  %s\n" "$name"
         [ -n "$msg" ] && printf "        -> %s\n" "$msg"
     fi
+
+    return 0
 }
 
 run_if() {
