@@ -15,6 +15,7 @@ Tests are plain bash scripts that call `aws` CLI commands with `--endpoint-url` 
 | `dynamodb` | Tables, put/get/update/query/delete items |
 | `iam` | Users, roles, create/get/delete |
 | `sts` | GetCallerIdentity |
+| `ses` | Identities, sending, quotas, notification attributes |
 | `secretsmanager` | Create/get/put/list/tag/delete secrets |
 | `kms` | Keys, aliases, encrypt/decrypt |
 

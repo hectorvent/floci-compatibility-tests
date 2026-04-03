@@ -730,6 +730,96 @@ run_sts() {
 }
 
 # ---------------------------------------------------------------------------
+# SES
+# ---------------------------------------------------------------------------
+
+run_ses() {
+    echo "--- SES Tests ---"
+
+    local suffix test_email test_domain out rc token found message_id raw_file
+    suffix=$(date +%s)
+    test_email="test-${suffix}@example.com"
+    test_domain="test-${suffix}.example.com"
+
+    out=$(aws_cmd ses verify-email-identity --email-address "$test_email" 2>&1) && rc=0 || rc=1
+    check "SES VerifyEmailIdentity" "$( [ $rc -eq 0 ] && echo true || echo false )" "$out"
+
+    out=$(aws_cmd ses verify-domain-identity --domain "$test_domain" 2>&1) && rc=0 || rc=1
+    token=$(echo "$out" | python -c "import sys,json; print(json.load(sys.stdin).get('VerificationToken',''))" 2>/dev/null || echo "")
+    check "SES VerifyDomainIdentity" "$( [ -n "$token" ] && echo true || echo false )" "$out"
+
+    out=$(aws_cmd ses list-identities 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; d=json.load(sys.stdin); ids=d.get('Identities',[]); print('true' if '$test_email' in ids and '$test_domain' in ids else 'false')" 2>/dev/null || echo false)
+    check "SES ListIdentities" "$found" "$out"
+
+    out=$(aws_cmd ses list-identities --identity-type EmailAddress 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; d=json.load(sys.stdin); ids=d.get('Identities',[]); print('true' if '$test_email' in ids and '$test_domain' not in ids else 'false')" 2>/dev/null || echo false)
+    check "SES ListIdentities by type" "$found" "$out"
+
+    out=$(aws_cmd ses get-identity-verification-attributes --identities "$test_email" 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; d=json.load(sys.stdin).get('VerificationAttributes',{}).get('$test_email',{}); print('true' if d.get('VerificationStatus') == 'Success' else 'false')" 2>/dev/null || echo false)
+    check "SES GetIdentityVerificationAttributes" "$found" "$out"
+
+    out=$(aws_cmd ses list-verified-email-addresses 2>&1) && rc=0 || rc=1
+    check "SES ListVerifiedEmailAddresses unsupported" "$( [[ "$out" == *"invalid choice 'list-verified-email-addresses'"* ]] && echo true || echo false )" "$out"
+
+    out=$(aws_cmd ses send-email \
+        --from "$test_email" \
+        --destination "ToAddresses=recipient@example.com" \
+        --message "Subject={Data=Test Subject},Body={Text={Data=Hello from SES test}}" 2>&1) && rc=0 || rc=1
+    message_id=$(echo "$out" | python -c "import sys,json; print(json.load(sys.stdin).get('MessageId',''))" 2>/dev/null || echo "")
+    check "SES SendEmail" "$( [ -n "$message_id" ] && echo true || echo false )" "$out"
+
+    raw_file=$(mktemp)
+    printf 'From: %s\r\nTo: recipient@example.com\r\nSubject: Raw Test\r\n\r\nRaw body' "$test_email" > "$raw_file"
+    local raw_b64
+    raw_b64=$(python -c "import base64,sys; print(base64.b64encode(open(sys.argv[1],'rb').read()).decode())" "$raw_file")
+    out=$(aws_cmd ses send-raw-email \
+        --source "$test_email" \
+        --destinations "recipient@example.com" \
+        --raw-message "Data=$raw_b64" 2>&1) && rc=0 || rc=1
+    message_id=$(echo "$out" | python -c "import sys,json; print(json.load(sys.stdin).get('MessageId',''))" 2>/dev/null || echo "")
+    check "SES SendRawEmail" "$( [ -n "$message_id" ] && echo true || echo false )" "$out"
+    rm -f "$raw_file"
+
+    out=$(aws_cmd ses get-send-quota 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; d=json.load(sys.stdin); print('true' if float(d.get('Max24HourSend',0)) > 0 and float(d.get('MaxSendRate',0)) > 0 and float(d.get('SentLast24Hours',0)) >= 0 else 'false')" 2>/dev/null || echo false)
+    check "SES GetSendQuota" "$found" "$out"
+
+    out=$(aws_cmd ses get-send-statistics 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; print('true' if json.load(sys.stdin).get('SendDataPoints',[]) is not None else 'false')" 2>/dev/null || echo false)
+    check "SES GetSendStatistics" "$found" "$out"
+
+    out=$(aws_cmd ses get-account-sending-enabled 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; print('true' if json.load(sys.stdin).get('Enabled') is True else 'false')" 2>/dev/null || echo false)
+    check "SES GetAccountSendingEnabled" "$found" "$out"
+
+    out=$(aws_cmd ses get-identity-dkim-attributes --identities "$test_domain" 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; attrs=json.load(sys.stdin).get('DkimAttributes',{}); print('true' if '$test_domain' in attrs else 'false')" 2>/dev/null || echo false)
+    check "SES GetIdentityDkimAttributes" "$found" "$out"
+
+    out=$(aws_cmd ses set-identity-notification-topic \
+        --identity "$test_email" \
+        --notification-type Bounce \
+        --sns-topic arn:aws:sns:us-east-1:000000000000:bounce-topic 2>&1) && rc=0 || rc=1
+    check "SES SetIdentityNotificationTopic accepted parser bug" "$( [[ "$out" == *"'SetIdentityNotificationTopicResult'"* ]] || [ $rc -eq 0 ] && echo true || echo false )" "$out"
+
+    out=$(aws_cmd ses get-identity-notification-attributes --identities "$test_email" 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; attrs=json.load(sys.stdin).get('NotificationAttributes',{}).get('$test_email',{}); print('true' if 'bounce-topic' in attrs.get('BounceTopic','') else 'false')" 2>/dev/null || echo false)
+    check "SES GetIdentityNotificationAttributes" "$found" "$out"
+
+    out=$(aws_cmd ses delete-identity --identity "$test_email" 2>&1) && rc=0 || rc=1
+    check "SES DeleteIdentity email accepted parser bug" "$( [[ "$out" == *"'DeleteIdentityResult'"* ]] || [ $rc -eq 0 ] && echo true || echo false )" "$out"
+
+    out=$(aws_cmd ses delete-identity --identity "$test_domain" 2>&1) && rc=0 || rc=1
+    check "SES DeleteIdentity domain accepted parser bug" "$( [[ "$out" == *"'DeleteIdentityResult'"* ]] || [ $rc -eq 0 ] && echo true || echo false )" "$out"
+
+    out=$(aws_cmd ses list-identities 2>&1) && rc=0 || rc=1
+    found=$(echo "$out" | python -c "import sys,json; ids=json.load(sys.stdin).get('Identities',[]); print('true' if '$test_email' not in ids and '$test_domain' not in ids else 'false')" 2>/dev/null || echo false)
+    check "SES DeleteIdentity verification" "$found" "$out"
+}
+
+# ---------------------------------------------------------------------------
 # Secrets Manager
 # ---------------------------------------------------------------------------
 
@@ -1003,7 +1093,7 @@ print(len(tc[0]['Filter']['Key']['FilterRules']) if tc and 'Filter' in tc[0] els
 # Group registry and entry point
 # ---------------------------------------------------------------------------
 
-ALL_GROUPS=(ssm sqs sns s3 dynamodb dynamodb-gsi dynamodb-scan-filter iam sts secretsmanager kms cognito s3-notifications)
+ALL_GROUPS=(ssm sqs sns s3 dynamodb dynamodb-gsi dynamodb-scan-filter iam sts ses secretsmanager kms cognito s3-notifications)
 
 resolve_enabled() {
     local names=()
