@@ -60,6 +60,9 @@ public class CognitoTests implements TestGroup {
                         .username(fUsername)
                         .userAttributes(AttributeType.builder().name("email").value("test@example.com").build()));
                 ctx.check("Cognito AdminCreateUser", resp.user().username().equals(fUsername));
+                
+                boolean hasSub = resp.user().attributes().stream().anyMatch(a -> "sub".equals(a.name()));
+                ctx.check("Cognito AdminCreateUser contains sub", hasSub);
             } catch (Exception e) {
                 ctx.check("Cognito AdminCreateUser", false, e);
             }
@@ -87,6 +90,13 @@ public class CognitoTests implements TestGroup {
                     final String token = accessToken;
                     GetUserResponse resp = cognito.getUser(b -> b.accessToken(token));
                     ctx.check("Cognito GetUser", resp.username().equals(fUsername));
+
+                    try {
+                        cognito.adminUserGlobalSignOut(b -> b.userPoolId(fPoolId).username(fUsername));
+                        ctx.check("Cognito AdminUserGlobalSignOut", true);
+                    } catch (Exception e) {
+                        ctx.check("Cognito AdminUserGlobalSignOut", false, e);
+                    }
                 } catch (Exception e) {
                     ctx.check("Cognito GetUser", false, e);
                 }
@@ -170,6 +180,18 @@ public class CognitoTests implements TestGroup {
                     String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
                     ctx.check("Cognito JWT cognito:groups claim",
                             payload.contains("\"cognito:groups\"") && payload.contains("\"test-group\""));
+                    
+                    // Verify consistent sub in JWT
+                    String subAttr = null;
+                    AdminGetUserResponse userResp = cognito.adminGetUser(b -> b.userPoolId(fPoolId).username(fUsername));
+                    for (AttributeType attr : userResp.userAttributes()) {
+                        if ("sub".equals(attr.name())) {
+                            subAttr = attr.value();
+                        }
+                    }
+                    ctx.check("Cognito JWT sub claim match", 
+                        payload.contains("\"sub\":\"" + subAttr + "\""));
+
                 } catch (Exception e) {
                     ctx.check("Cognito JWT cognito:groups claim", false, e);
                 }
