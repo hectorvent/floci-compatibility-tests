@@ -34,6 +34,7 @@ public class CloudWatchLogsTests implements TestGroup {
             testCreateLogStream(ctx, cw);
             testPutAndGetLogEvents(ctx, cw);
             testGetLogEventsTimeFilter(ctx, cw);
+            testGetLogEventsPagination(ctx, cw);
             testFilterLogEvents(ctx, cw);
             testDeleteLogStream(ctx, cw);
             testDeleteLogGroup(ctx, cw);
@@ -137,6 +138,55 @@ public class CloudWatchLogsTests implements TestGroup {
                     && "mid-event".equals(filtered.events().get(0).message()));
         } catch (Exception e) {
             ctx.check("CWL GetLogEventsTimeFilter", false, e);
+        }
+    }
+
+    private void testGetLogEventsPagination(TestContext ctx, CloudWatchLogsClient cw) {
+        String stream = "stream-pagination";
+        try {
+            cw.createLogStream(b -> b.logGroupName(GROUP_NAME).logStreamName(stream));
+
+            long base = System.currentTimeMillis() - 10000;
+            List<InputLogEvent> events = new java.util.ArrayList<>();
+            for (int i = 0; i < 7; i++) {
+                final int idx = i;
+                events.add(InputLogEvent.builder().timestamp(base + idx).message("page-msg-" + idx).build());
+            }
+            cw.putLogEvents(b -> b.logGroupName(GROUP_NAME).logStreamName(stream).logEvents(events));
+
+            // Page 1: limit=3, startFromHead
+            GetLogEventsResponse page1 = cw.getLogEvents(b -> b
+                    .logGroupName(GROUP_NAME).logStreamName(stream)
+                    .limit(3).startFromHead(true));
+            ctx.check("CWL GetLogEvents pagination page1 count=3", page1.events().size() == 3);
+            ctx.check("CWL GetLogEvents pagination page1 first message",
+                    "page-msg-0".equals(page1.events().get(0).message()));
+
+            // Page 2: use nextForwardToken
+            GetLogEventsResponse page2 = cw.getLogEvents(b -> b
+                    .logGroupName(GROUP_NAME).logStreamName(stream)
+                    .limit(3).nextToken(page1.nextForwardToken()));
+            ctx.check("CWL GetLogEvents pagination page2 count=3", page2.events().size() == 3);
+            ctx.check("CWL GetLogEvents pagination page2 first message",
+                    "page-msg-3".equals(page2.events().get(0).message()));
+
+            // Page 3 (last): remaining 1 event
+            GetLogEventsResponse page3 = cw.getLogEvents(b -> b
+                    .logGroupName(GROUP_NAME).logStreamName(stream)
+                    .limit(3).nextToken(page2.nextForwardToken()));
+            ctx.check("CWL GetLogEvents pagination page3 count=1", page3.events().size() == 1);
+            ctx.check("CWL GetLogEvents pagination page3 message",
+                    "page-msg-6".equals(page3.events().get(0).message()));
+
+            // End-of-stream: token must echo back (SDK uses this to stop)
+            GetLogEventsResponse atEnd = cw.getLogEvents(b -> b
+                    .logGroupName(GROUP_NAME).logStreamName(stream)
+                    .limit(3).nextToken(page3.nextForwardToken()));
+            ctx.check("CWL GetLogEvents end-of-stream token echoed",
+                    page3.nextForwardToken().equals(atEnd.nextForwardToken()));
+
+        } catch (Exception e) {
+            ctx.check("CWL GetLogEvents pagination", false, e);
         }
     }
 
