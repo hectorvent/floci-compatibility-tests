@@ -213,7 +213,31 @@ public class SecretsManagerTests implements TestGroup {
                 ctx.check("SM RotateSecret stub", false, e);
             }
 
-            // 13. DeleteSecret (force) -> subsequent GetSecretValue throws SecretsManagerException 400
+            // 13. KmsKeyId preservation
+            try {
+                String kmsKeyId = "arn:aws:kms:us-east-1:000000000000:key/my-key";
+                String kmsSecretName = "sdk-test-kms-secret-" + System.currentTimeMillis();
+                sm.createSecret(CreateSecretRequest.builder()
+                        .name(kmsSecretName)
+                        .secretString("kms-value")
+                        .kmsKeyId(kmsKeyId)
+                        .build());
+                DescribeSecretResponse describeResp = sm.describeSecret(DescribeSecretRequest.builder()
+                        .secretId(kmsSecretName)
+                        .build());
+                ctx.check("SM KmsKeyId preservation",
+                        kmsKeyId.equals(describeResp.kmsKeyId()));
+
+                // Cleanup
+                sm.deleteSecret(DeleteSecretRequest.builder()
+                        .secretId(kmsSecretName)
+                        .forceDeleteWithoutRecovery(true)
+                        .build());
+            } catch (Exception e) {
+                ctx.check("SM KmsKeyId preservation", false, e);
+            }
+
+            // 14. DeleteSecret (force) -> subsequent GetSecretValue throws SecretsManagerException 400
             try {
                 sm.deleteSecret(DeleteSecretRequest.builder()
                         .secretId(secretName)
@@ -231,7 +255,7 @@ public class SecretsManagerTests implements TestGroup {
                 ctx.check("SM DeleteSecret (force)", false, e);
             }
 
-            // 14. CreateSecret duplicate — SecretsManagerException 400
+            // 15. CreateSecret duplicate — SecretsManagerException 400
             String dupName = "sdk-test-dup-secret-" + System.currentTimeMillis();
             try {
                 sm.createSecret(CreateSecretRequest.builder()
@@ -256,7 +280,7 @@ public class SecretsManagerTests implements TestGroup {
                 ctx.check("SM CreateSecret duplicate", false, e);
             }
 
-            // 15. GetRandomPassword — returns non-empty password with requested length
+            // 16. GetRandomPassword — returns non-empty password with requested length
             try {
                 GetRandomPasswordResponse resp = sm.getRandomPassword(GetRandomPasswordRequest.builder()
                         .passwordLength(32L)
@@ -269,7 +293,7 @@ public class SecretsManagerTests implements TestGroup {
                 ctx.check("SM GetRandomPassword", false, e);
             }
 
-            // 16. GetSecretValue non-existent — SecretsManagerException 400
+            // 17. GetSecretValue non-existent — SecretsManagerException 400
             try {
                 sm.getSecretValue(GetSecretValueRequest.builder()
                         .secretId("non-existent-secret-" + System.currentTimeMillis())
