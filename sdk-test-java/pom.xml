@@ -147,6 +147,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>opensearch</artifactId>
         </dependency>
+        <!-- ECS client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ecs</artifactId>
+        </dependency>
         <!-- CloudFormation client -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
