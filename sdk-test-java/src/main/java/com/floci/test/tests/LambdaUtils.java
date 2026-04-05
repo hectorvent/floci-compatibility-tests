@@ -92,6 +92,33 @@ public class LambdaUtils {
     }
 
     /**
+     * ZIP containing a Node.js handler that always reports every SQS message as a batch item
+     * failure. Used to test {@code ReportBatchItemFailures} ESM behaviour.
+     */
+    public static byte[] batchItemFailuresZip() {
+        String code = """
+                exports.handler = async (event) => {
+                    const failures = (event.Records || []).map(r => ({
+                        itemIdentifier: r.messageId
+                    }));
+                    console.log('[esm-failures] reporting failures:', JSON.stringify(failures));
+                    return { batchItemFailures: failures };
+                };
+                """;
+        try {
+            var baos = new java.io.ByteArrayOutputStream();
+            try (var zos = new java.util.zip.ZipOutputStream(baos)) {
+                zos.putNextEntry(new java.util.zip.ZipEntry("index.js"));
+                zos.write(code.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zos.closeEntry();
+            }
+            return baos.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to build batchItemFailures ZIP", e);
+        }
+    }
+
+    /**
      * Minimal valid ZIP containing a stub {@code index.js} — accepted by the emulator
      * without needing a real runtime.
      */

@@ -245,6 +245,112 @@ public class SqsLambdaEsmTests implements TestGroup {
                 ctx.check("ESM: disabled — message not consumed (stays in queue)", false, e);
             }
 
+            // ── ReportBatchItemFailures ─────────────────────────────────────
+            // Create a separate function that always reports every message as failed.
+            // The ESM must NOT delete those messages; they should reappear in the queue.
+
+            String failFunctionName = "esm-fail-fn";
+            String failQueueName    = "esm-fail-queue";
+            String failQueueUrl     = ctx.endpoint + "/" + ACCOUNT_ID + "/" + failQueueName;
+            String failQueueArn     = "arn:aws:sqs:us-east-1:" + ACCOUNT_ID + ":" + failQueueName;
+            String failEsmUuid      = null;
+
+            try {
+                sqs.createQueue(CreateQueueRequest.builder().queueName(failQueueName).build());
+                ctx.check("ESM-RBIF: CreateQueue", true);
+            } catch (Exception e) {
+                ctx.check("ESM-RBIF: CreateQueue", false, e);
+            }
+
+            try {
+                lambda.createFunction(CreateFunctionRequest.builder()
+                        .functionName(failFunctionName)
+                        .runtime(Runtime.NODEJS20_X)
+                        .role("arn:aws:iam::000000000000:role/lambda-role")
+                        .handler("index.handler").timeout(120).memorySize(256)
+                        .code(FunctionCode.builder()
+                                .zipFile(SdkBytes.fromByteArray(LambdaUtils.batchItemFailuresZip()))
+                                .build())
+                        .build());
+                ctx.check("ESM-RBIF: CreateFunction (always-fail handler)", true);
+            } catch (Exception e) {
+                ctx.check("ESM-RBIF: CreateFunction (always-fail handler)", false, e);
+            }
+
+            try {
+                CreateEventSourceMappingResponse failEsm = lambda.createEventSourceMapping(
+                        CreateEventSourceMappingRequest.builder()
+                                .functionName(failFunctionName)
+                                .eventSourceArn(failQueueArn)
+                                .batchSize(1)
+                                .functionResponseTypesWithStrings("ReportBatchItemFailures")
+                                .build());
+                failEsmUuid = failEsm.uuid();
+                boolean hasRbif = failEsm.functionResponseTypesAsStrings()
+                        .contains("ReportBatchItemFailures");
+                ctx.check("ESM-RBIF: CreateEventSourceMapping (FunctionResponseTypes persisted)", hasRbif);
+            } catch (Exception e) {
+                ctx.check("ESM-RBIF: CreateEventSourceMapping (FunctionResponseTypes persisted)", false, e);
+            }
+
+            if (failEsmUuid != null) {
+                // Verify FunctionResponseTypes round-trips via GetEventSourceMapping
+                try {
+                    GetEventSourceMappingResponse get = lambda.getEventSourceMapping(
+                            GetEventSourceMappingRequest.builder().uuid(failEsmUuid).build());
+                    boolean hasRbif = get.functionResponseTypesAsStrings()
+                            .contains("ReportBatchItemFailures");
+                    ctx.check("ESM-RBIF: GetEventSourceMapping (FunctionResponseTypes round-trip)", hasRbif);
+                } catch (Exception e) {
+                    ctx.check("ESM-RBIF: GetEventSourceMapping (FunctionResponseTypes round-trip)", false, e);
+                }
+
+                // Send one message; Lambda will report it as failed → must NOT be deleted
+                try {
+                    System.out.println("  (ESM-RBIF: sending message, waiting for Lambda to report failure...)");
+                    sqs.sendMessage(SendMessageRequest.builder()
+                            .queueUrl(failQueueUrl).messageBody("{\"test\":\"should-fail\"}").build());
+
+                    // Wait for the ESM poller to pick up the message, invoke Lambda, and
+                    // (correctly) leave it in the queue. The message becomes visible again
+                    // after the visibility timeout, so we poll until it reappears.
+                    boolean messageStayed = false;
+                    long deadline = System.currentTimeMillis() + 120_000;
+                    while (System.currentTimeMillis() < deadline) {
+                        GetQueueAttributesResponse attrs = sqs.getQueueAttributes(
+                                GetQueueAttributesRequest.builder()
+                                        .queueUrl(failQueueUrl)
+                                        .attributeNames(
+                                                QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES,
+                                                QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE)
+                                        .build());
+                        int visible   = Integer.parseInt(attrs.attributes()
+                                .getOrDefault(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES, "0"));
+                        int inFlight  = Integer.parseInt(attrs.attributes()
+                                .getOrDefault(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE, "0"));
+                        // Message should eventually reappear as visible (not deleted)
+                        if (visible > 0) {
+                            messageStayed = true;
+                            break;
+                        }
+                        // Still in-flight (Lambda running or visibility timeout not expired) — keep waiting
+                        Thread.sleep(1_000);
+                    }
+                    ctx.check("ESM-RBIF: failed message stays in queue (not deleted)", messageStayed);
+                } catch (Exception e) {
+                    ctx.check("ESM-RBIF: failed message stays in queue (not deleted)", false, e);
+                }
+
+                // Cleanup
+                try {
+                    lambda.deleteEventSourceMapping(
+                            DeleteEventSourceMappingRequest.builder().uuid(failEsmUuid).build());
+                } catch (Exception ignore) {}
+            }
+
+            try { lambda.deleteFunction(DeleteFunctionRequest.builder().functionName(failFunctionName).build()); } catch (Exception ignore) {}
+            try { sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(failQueueUrl).build()); } catch (Exception ignore) {}
+
             // ── Error case: non-existent function ──────────────────────────
 
             try {
