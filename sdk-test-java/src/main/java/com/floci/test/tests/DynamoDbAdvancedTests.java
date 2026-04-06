@@ -27,6 +27,7 @@ public class DynamoDbAdvancedTests implements TestGroup {
                 .build()) {
 
             runGsiTests(ctx, ddb);
+            runUpdateTableGsiTests(ctx, ddb);
             runPaginationTests(ctx, ddb);
             runQueryFilterPaginationTests(ctx, ddb);
             runSortKeyQueryTests(ctx, ddb);
@@ -767,5 +768,116 @@ public class DynamoDbAdvancedTests implements TestGroup {
         try {
             ddb.deleteTable(DeleteTableRequest.builder().tableName(tableName).build());
         } catch (Exception ignored) {}
+    }
+
+    // --- UpdateTable GSI (Create / Delete via GlobalSecondaryIndexUpdates) ---
+
+    private void runUpdateTableGsiTests(TestContext ctx, DynamoDbClient ddb) {
+        String tableName = "adv-update-gsi-table";
+
+        try {
+            // Create table without GSI
+            ddb.createTable(CreateTableRequest.builder()
+                    .tableName(tableName)
+                    .keySchema(KeySchemaElement.builder()
+                            .attributeName("pk").keyType(KeyType.HASH).build())
+                    .attributeDefinitions(AttributeDefinition.builder()
+                            .attributeName("pk").attributeType(ScalarAttributeType.S).build())
+                    .billingMode(BillingMode.PAY_PER_REQUEST)
+                    .build());
+
+            DescribeTableResponse desc = ddb.describeTable(DescribeTableRequest.builder()
+                    .tableName(tableName).build());
+            ctx.check("UpdateTable GSI: table created without GSI",
+                    !desc.table().hasGlobalSecondaryIndexes()
+                            || desc.table().globalSecondaryIndexes().isEmpty());
+
+            // Add GSI via UpdateTable (ALL projection)
+            UpdateTableResponse addResp = ddb.updateTable(UpdateTableRequest.builder()
+                    .tableName(tableName)
+                    .attributeDefinitions(
+                            AttributeDefinition.builder().attributeName("pk").attributeType(ScalarAttributeType.S).build(),
+                            AttributeDefinition.builder().attributeName("gsiPk").attributeType(ScalarAttributeType.S).build(),
+                            AttributeDefinition.builder().attributeName("gsiSk").attributeType(ScalarAttributeType.S).build())
+                    .globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
+                            .create(CreateGlobalSecondaryIndexAction.builder()
+                                    .indexName("TestGsi")
+                                    .keySchema(
+                                            KeySchemaElement.builder().attributeName("gsiPk").keyType(KeyType.HASH).build(),
+                                            KeySchemaElement.builder().attributeName("gsiSk").keyType(KeyType.RANGE).build())
+                                    .projection(Projection.builder().projectionType(ProjectionType.ALL).build())
+                                    .build())
+                            .build())
+                    .build());
+
+            List<GlobalSecondaryIndexDescription> gsis = addResp.tableDescription().globalSecondaryIndexes();
+            ctx.check("UpdateTable GSI: add GSI with ALL projection",
+                    gsis != null && gsis.size() == 1 && "TestGsi".equals(gsis.get(0).indexName()));
+
+            // DescribeTable returns the GSI
+            desc = ddb.describeTable(DescribeTableRequest.builder().tableName(tableName).build());
+            gsis = desc.table().globalSecondaryIndexes();
+            ctx.check("UpdateTable GSI: DescribeTable returns GSI",
+                    gsis != null && gsis.size() == 1
+                            && gsis.get(0).indexArn().contains("/index/TestGsi")
+                            && desc.table().attributeDefinitions().size() == 3);
+
+            // Add second GSI with KEYS_ONLY projection
+            UpdateTableResponse addResp2 = ddb.updateTable(UpdateTableRequest.builder()
+                    .tableName(tableName)
+                    .attributeDefinitions(
+                            AttributeDefinition.builder().attributeName("pk").attributeType(ScalarAttributeType.S).build(),
+                            AttributeDefinition.builder().attributeName("gsiPk").attributeType(ScalarAttributeType.S).build(),
+                            AttributeDefinition.builder().attributeName("gsiSk").attributeType(ScalarAttributeType.S).build(),
+                            AttributeDefinition.builder().attributeName("owner").attributeType(ScalarAttributeType.S).build())
+                    .globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
+                            .create(CreateGlobalSecondaryIndexAction.builder()
+                                    .indexName("OwnerIndex")
+                                    .keySchema(
+                                            KeySchemaElement.builder().attributeName("owner").keyType(KeyType.HASH).build(),
+                                            KeySchemaElement.builder().attributeName("pk").keyType(KeyType.RANGE).build())
+                                    .projection(Projection.builder().projectionType(ProjectionType.KEYS_ONLY).build())
+                                    .build())
+                            .build())
+                    .build());
+
+            gsis = addResp2.tableDescription().globalSecondaryIndexes();
+            ctx.check("UpdateTable GSI: add second GSI with KEYS_ONLY projection",
+                    gsis != null && gsis.size() == 2
+                            && gsis.stream().anyMatch(g -> "OwnerIndex".equals(g.indexName())
+                                && ProjectionType.KEYS_ONLY == g.projection().projectionType()));
+
+            // Delete one GSI
+            UpdateTableResponse delResp = ddb.updateTable(UpdateTableRequest.builder()
+                    .tableName(tableName)
+                    .globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
+                            .delete(DeleteGlobalSecondaryIndexAction.builder()
+                                    .indexName("TestGsi").build())
+                            .build())
+                    .build());
+
+            gsis = delResp.tableDescription().globalSecondaryIndexes();
+            ctx.check("UpdateTable GSI: delete one GSI (one remains)",
+                    gsis != null && gsis.size() == 1 && "OwnerIndex".equals(gsis.get(0).indexName()));
+
+            // Delete remaining GSI
+            ddb.updateTable(UpdateTableRequest.builder()
+                    .tableName(tableName)
+                    .globalSecondaryIndexUpdates(GlobalSecondaryIndexUpdate.builder()
+                            .delete(DeleteGlobalSecondaryIndexAction.builder()
+                                    .indexName("OwnerIndex").build())
+                            .build())
+                    .build());
+
+            desc = ddb.describeTable(DescribeTableRequest.builder().tableName(tableName).build());
+            ctx.check("UpdateTable GSI: delete all GSIs",
+                    !desc.table().hasGlobalSecondaryIndexes()
+                            || desc.table().globalSecondaryIndexes().isEmpty());
+
+        } catch (Exception e) {
+            ctx.check("UpdateTable GSI: unexpected error", false, e);
+        } finally {
+            deleteSilently(ddb, tableName);
+        }
     }
 }
